@@ -10,14 +10,13 @@ from nautobot.extras.jobs import Job, TextVar
 from nautobot.dcim.models import (
     Device,
     DeviceType,
-    DeviceRole,
     Manufacturer,
-    Site,
+    Location,
     Rack,
     Platform,
     VirtualChassis,
 )
-from nautobot.extras.models import Status
+from nautobot.extras.models import Status, Role
 
 
 class ImportVirtualChassisDevices(Job):
@@ -45,8 +44,8 @@ class ImportVirtualChassisDevices(Job):
         label="CSV Data"
     )
     
-    # Site code to Site name mapping
-    SITE_MAPPING = {
+    # Location code to Location name mapping (for Nautobot 2.0+/3.0)
+    LOCATION_MAPPING = {
         'arl-art': 'Arlington Tower',
         # Add more mappings as needed
     }
@@ -186,10 +185,10 @@ class ImportVirtualChassisDevices(Job):
         
         self.log_info(message=f"Creating new device: {device_name}")
         
-        # Parse site from device name
-        site = self.get_site_from_device_name(device_name)
-        if not site:
-            raise ValidationError(f"Could not determine site for device {device_name}")
+        # Parse location from device name
+        location = self.get_location_from_device_name(device_name)
+        if not location:
+            raise ValidationError(f"Could not determine location for device {device_name}")
         
         # Get the master member (Role = master, typically ID 0)
         master_member = next((m for m in members if m['Role'].strip().lower() == 'master'), members[0])
@@ -198,25 +197,28 @@ class ImportVirtualChassisDevices(Job):
         device_type = self.get_device_type(master_member['Model'])
         
         # Get or create device role
-        device_role, created = DeviceRole.objects.get_or_create(
+        device_role, created = Role.objects.get_or_create(
             name='Access',
-            defaults={'slug': 'access', 'color': '9e9e9e'}
+            defaults={'color': '9e9e9e'}
         )
         if created:
-            self.log_success(message="Created DeviceRole: Access")
+            self.log_success(message="Created Role: Access")
+            # Add content types for Device
+            from django.contrib.contenttypes.models import ContentType
+            device_ct = ContentType.objects.get_for_model(Device)
+            device_role.content_types.add(device_ct)
         
         # Get or create platform
         platform, created = Platform.objects.get_or_create(
             name='Juniper_junos',
-            defaults={'slug': 'juniper-junos'}
+            defaults={'network_driver': 'juniper_junos'}
         )
         if created:
             self.log_success(message="Created Platform: Juniper_junos")
         
         # Get or create status
         status, created = Status.objects.get_or_create(
-            name='Active',
-            defaults={'slug': 'active'}
+            name='Active'
         )
         if created:
             self.log_success(message="Created Status: Active")
@@ -226,7 +228,7 @@ class ImportVirtualChassisDevices(Job):
             status.content_types.add(device_ct)
         
         # Parse rack from location if available
-        rack = self.get_rack_from_location(master_member.get('Location', ''), site)
+        rack = self.get_rack_from_location(master_member.get('Location', ''), location)
         
         # Create virtual chassis
         vc = VirtualChassis.objects.create(
@@ -239,8 +241,8 @@ class ImportVirtualChassisDevices(Job):
         master_device = Device.objects.create(
             name=device_name,
             device_type=device_type,
-            device_role=device_role,
-            site=site,
+            role=device_role,
+            location=location,
             platform=platform,
             status=status,
             serial=master_member['Serial'].strip(),
@@ -266,8 +268,8 @@ class ImportVirtualChassisDevices(Job):
             member_device = Device.objects.create(
                 name=member_name,
                 device_type=device_type,
-                device_role=device_role,
-                site=site,
+                role=device_role,
+                location=location,
                 platform=platform,
                 status=status,
                 serial=member['Serial'].strip(),
@@ -288,34 +290,34 @@ class ImportVirtualChassisDevices(Job):
             'device': master_device
         }
     
-    def get_site_from_device_name(self, device_name):
-        """Parse site from device name"""
+    def get_location_from_device_name(self, device_name):
+        """Parse location from device name"""
         # Example: accs-arl-art-1550-1
-        # Site code is typically the middle part: arl-art
+        # Location code is typically the middle part: arl-art
         
         parts = device_name.split('-')
         if len(parts) >= 3:
-            # Try to find site code (e.g., arl-art)
-            site_code = f"{parts[1]}-{parts[2]}"
+            # Try to find location code (e.g., arl-art)
+            location_code = f"{parts[1]}-{parts[2]}"
             
-            if site_code in self.SITE_MAPPING:
-                site_name = self.SITE_MAPPING[site_code]
+            if location_code in self.LOCATION_MAPPING:
+                location_name = self.LOCATION_MAPPING[location_code]
                 try:
-                    site = Site.objects.get(name=site_name)
-                    self.log_info(message=f"Mapped {site_code} to site: {site.name}")
-                    return site
-                except Site.DoesNotExist:
-                    self.log_warning(message=f"Site not found: {site_name}")
+                    location = Location.objects.get(name=location_name)
+                    self.log_info(message=f"Mapped {location_code} to location: {location.name}")
+                    return location
+                except Location.DoesNotExist:
+                    self.log_warning(message=f"Location not found: {location_name}")
             else:
-                # Try to find site by slug matching
+                # Try to find location by name matching
                 try:
-                    site = Site.objects.get(slug__icontains=site_code)
-                    self.log_info(message=f"Found site by slug: {site.name}")
-                    return site
-                except (Site.DoesNotExist, Site.MultipleObjectsReturned):
+                    location = Location.objects.get(name__icontains=location_code)
+                    self.log_info(message=f"Found location by name: {location.name}")
+                    return location
+                except (Location.DoesNotExist, Location.MultipleObjectsReturned):
                     self.log_warning(
-                        message=f"Could not find unique site for code: {site_code}. "
-                        f"Add mapping to SITE_MAPPING."
+                        message=f"Could not find unique location for code: {location_code}. "
+                        f"Add mapping to LOCATION_MAPPING."
                     )
         
         return None
@@ -351,20 +353,20 @@ class ImportVirtualChassisDevices(Job):
             self.log_success(message=f"Created DeviceType: {model_upper}")
             return device_type
     
-    def get_rack_from_location(self, location, site):
+    def get_rack_from_location(self, location_str, location):
         """Parse rack from location string"""
-        if not location:
+        if not location_str:
             return None
         
         # Example: RR-VA-1550-R1R2 RU27
         # Extract rack name (everything before ' RU')
-        rack_name = location.split(' RU')[0].strip()
+        rack_name = location_str.split(' RU')[0].strip()
         
         if not rack_name:
             return None
         
         try:
-            rack = Rack.objects.get(name=rack_name, site=site)
+            rack = Rack.objects.get(name=rack_name, location=location)
             return rack
         except Rack.DoesNotExist:
             self.log_warning(message=f"Rack not found: {rack_name}")
