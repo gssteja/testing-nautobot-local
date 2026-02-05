@@ -388,3 +388,8 @@ class ImportVirtualChassisDevices(Job):
 
 
 jobs = [ImportVirtualChassisDevices]
+
+# Register jobs for Git repository
+from nautobot.apps.jobs import register_jobs
+register_jobs(*jobs)
+
