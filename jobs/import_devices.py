@@ -386,8 +386,8 @@ class ImportVirtualChassisDevices(Job):
         else:  # linecard
             return 1
 
-
 jobs = [ImportVirtualChassisDevices]
 
-from nautobot.extras.jobs import register_jobs
+# Register jobs for Git repository
+from nautobot.apps.jobs import register_jobs
 register_jobs(*jobs)
