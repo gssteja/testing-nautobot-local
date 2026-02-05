@@ -50,11 +50,11 @@ class ImportVirtualChassisDevices(Job):
         # Add more mappings as needed
     }
     
-    def run(self, data, commit):
+    def run(self, *, csv_data):
         """Main job execution"""
         
         # Parse CSV
-        csv_reader = csv.DictReader(StringIO(data['csv_data']))
+        csv_reader = csv.DictReader(StringIO(csv_data))
         rows = list(csv_reader)
         
         if not rows:
@@ -386,8 +386,5 @@ class ImportVirtualChassisDevices(Job):
         else:  # linecard
             return 1
 
-jobs = [ImportVirtualChassisDevices]
 
-# Register jobs for Git repository
-from nautobot.apps.jobs import register_jobs
-register_jobs(*jobs)
+jobs = [ImportVirtualChassisDevices]
