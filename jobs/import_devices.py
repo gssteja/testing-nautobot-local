@@ -58,10 +58,10 @@ class ImportVirtualChassisDevices(Job):
         rows = list(csv_reader)
         
         if not rows:
-            self.log_failure(message="No data found in CSV")
+            self.logger.error("No data found in CSV")
             return
         
-        self.log_info(message=f"Parsed {len(rows)} rows from CSV")
+        self.logger.info(f"Parsed {len(rows)} rows from CSV")
         
         # Group rows by device name (virtual chassis)
         devices_data = defaultdict(list)
@@ -69,7 +69,7 @@ class ImportVirtualChassisDevices(Job):
             device_name = row['Device'].strip()
             devices_data[device_name].append(row)
         
-        self.log_info(message=f"Found {len(devices_data)} unique devices")
+        self.logger.info(f"Found {len(devices_data)} unique devices")
         
         # Process each device
         results = {
@@ -94,25 +94,25 @@ class ImportVirtualChassisDevices(Job):
                         'error': result['error']
                     })
             except Exception as e:
-                self.log_failure(message=f"Error processing {device_name}: {str(e)}")
+                self.logger.error(f"Error processing {device_name}: {str(e)}")
                 results['errors'].append({
                     'device': device_name,
                     'error': str(e)
                 })
         
         # Summary
-        self.log_success(message=f"Created {len(results['created'])} devices")
-        self.log_success(message=f"Validated {len(results['validated'])} existing devices")
+        self.logger.success(f"Created {len(results['created'])} devices")
+        self.logger.success(f"Validated {len(results['validated'])} existing devices")
         
         if results['mismatches']:
-            self.log_warning(message=f"Found {len(results['mismatches'])} mismatches:")
+            self.logger.warning(f"Found {len(results['mismatches'])} mismatches:")
             for mismatch in results['mismatches']:
-                self.log_warning(message=f"  {mismatch}")
+                self.logger.warning(f"  {mismatch}")
         
         if results['errors']:
-            self.log_failure(message=f"Encountered {len(results['errors'])} errors:")
+            self.logger.error(f"Encountered {len(results['errors'])} errors:")
             for error in results['errors']:
-                self.log_failure(message=f"  {error['device']}: {error['error']}")
+                self.logger.error(f"  {error['device']}: {error['error']}")
     
     def process_device(self, device_name, members):
         """Process a single device with its virtual chassis members"""
@@ -130,7 +130,7 @@ class ImportVirtualChassisDevices(Job):
     def validate_existing_device(self, device, members):
         """Validate existing device's virtual chassis configuration"""
         
-        self.log_info(message=f"Validating existing device: {device.name}")
+        self.logger.info(f"Validating existing device: {device.name}")
         
         mismatches = []
         
@@ -173,7 +173,7 @@ class ImportVirtualChassisDevices(Job):
         
         if mismatches:
             for mismatch in mismatches:
-                self.log_warning(message=mismatch)
+                self.logger.warning(mismatch)
         
         return {
             'status': 'validated',
@@ -183,7 +183,7 @@ class ImportVirtualChassisDevices(Job):
     def create_new_device(self, device_name, members):
         """Create new device with virtual chassis"""
         
-        self.log_info(message=f"Creating new device: {device_name}")
+        self.logger.info(f"Creating new device: {device_name}")
         
         # Parse location from device name
         location = self.get_location_from_device_name(device_name)
@@ -202,7 +202,7 @@ class ImportVirtualChassisDevices(Job):
             defaults={'color': '9e9e9e'}
         )
         if created:
-            self.log_success(message="Created Role: Access")
+            self.logger.success("Created Role: Access")
             # Add content types for Device
             from django.contrib.contenttypes.models import ContentType
             device_ct = ContentType.objects.get_for_model(Device)
@@ -214,14 +214,14 @@ class ImportVirtualChassisDevices(Job):
             defaults={'network_driver': 'juniper_junos'}
         )
         if created:
-            self.log_success(message="Created Platform: Juniper_junos")
+            self.logger.success("Created Platform: Juniper_junos")
         
         # Get or create status
         status, created = Status.objects.get_or_create(
             name='Active'
         )
         if created:
-            self.log_success(message="Created Status: Active")
+            self.logger.success("Created Status: Active")
             # Add content types for Device
             from django.contrib.contenttypes.models import ContentType
             device_ct = ContentType.objects.get_for_model(Device)
@@ -235,7 +235,7 @@ class ImportVirtualChassisDevices(Job):
             name=device_name,
             domain=device_name
         )
-        self.log_success(message=f"Created virtual chassis: {vc.name}")
+        self.logger.success(f"Created virtual chassis: {vc.name}")
         
         # Create master device
         master_device = Device.objects.create(
@@ -257,7 +257,7 @@ class ImportVirtualChassisDevices(Job):
         vc.master = master_device
         vc.save()
         
-        self.log_success(message=f"Created master device: {master_device.name} (VC position {master_device.vc_position})")
+        self.logger.success(f"Created master device: {master_device.name} (VC position {master_device.vc_position})")
         
         # Create member devices (non-master)
         for member in members:
@@ -280,8 +280,8 @@ class ImportVirtualChassisDevices(Job):
                 face='FRONT',
             )
             
-            self.log_success(
-                message=f"  Created VC member: {member_device.name} "
+            self.logger.success(
+                f"  Created VC member: {member_device.name} "
                 f"(position {member_device.vc_position}, role: {member['Role'].strip()})"
             )
         
@@ -304,15 +304,15 @@ class ImportVirtualChassisDevices(Job):
                 location_name = self.LOCATION_MAPPING[location_code]
                 try:
                     location = Location.objects.get(name=location_name)
-                    self.log_info(message=f"Mapped {location_code} to location: {location.name}")
+                    self.logger.info(f"Mapped {location_code} to location: {location.name}")
                     return location
                 except Location.DoesNotExist:
-                    self.log_warning(message=f"Location not found: {location_name}")
+                    self.logger.warning(f"Location not found: {location_name}")
             else:
                 # Try to find location by name matching
                 try:
                     location = Location.objects.get(name__icontains=location_code)
-                    self.log_info(message=f"Found location by name: {location.name}")
+                    self.logger.info(f"Found location by name: {location.name}")
                     return location
                 except (Location.DoesNotExist, Location.MultipleObjectsReturned):
                     self.log_warning(
@@ -341,7 +341,7 @@ class ImportVirtualChassisDevices(Job):
             )
             
             if created:
-                self.log_success(message=f"Created manufacturer: {manufacturer_name}")
+                self.logger.success(f"Created manufacturer: {manufacturer_name}")
             
             # Create device type
             device_type = DeviceType.objects.create(
@@ -350,7 +350,7 @@ class ImportVirtualChassisDevices(Job):
                 slug=model_upper.lower().replace(' ', '-')
             )
             
-            self.log_success(message=f"Created DeviceType: {model_upper}")
+            self.logger.success(f"Created DeviceType: {model_upper}")
             return device_type
     
     def get_rack_from_location(self, location_str, location):
@@ -369,10 +369,10 @@ class ImportVirtualChassisDevices(Job):
             rack = Rack.objects.get(name=rack_name, location=location)
             return rack
         except Rack.DoesNotExist:
-            self.log_warning(message=f"Rack not found: {rack_name}")
+            self.logger.warning(f"Rack not found: {rack_name}")
             return None
         except Rack.MultipleObjectsReturned:
-            self.log_warning(message=f"Multiple racks found for name: {rack_name}")
+            self.logger.warning(f"Multiple racks found for name: {rack_name}")
             return None
     
     def get_vc_priority(self, role):
