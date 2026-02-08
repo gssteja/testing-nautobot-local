@@ -53,18 +53,24 @@ class AkipsDeviceImport(Job):
             'serial_mismatches': [],
             'vc_mismatches': []
         }
+        self.create_missing = False
 
     def parse_facility_code(self, device_name):
         """
-        Extract facility code from device name.
+        Extract facility code from device name by checking each part sequentially.
         
         Examples:
-            accs-arl-art-1550-1 -> ART
-            accs-ho-414-1 -> HO
-            accs-bo-ise-003-1 -> ISE
+            accs-arl-art-1550-1:
+                Skip 'accs', check 'arl' -> if match found, return it
+                Otherwise check 'art' -> if match found, return it
+                Otherwise return None (numbers start)
+            
+            accs-ho-414-1:
+                Skip 'accs', check 'ho' -> if match found, return it
+                Otherwise hit '414' (numbers), return None
         
         Logic: Split by '-', skip first part (device role), 
-        then collect parts until we hit a numeric part.
+        then try each subsequent part until we find a site match or hit numbers.
         """
         parts = device_name.split('-')
         
@@ -72,18 +78,28 @@ class AkipsDeviceImport(Job):
             return None
         
         # Skip the first part (device role like 'accs')
-        facility_parts = []
         for part in parts[1:]:
             # Stop when we encounter a part that starts with a digit
             if part and part[0].isdigit():
-                break
-            facility_parts.append(part)
-        
-        if facility_parts:
-            # Join and return uppercase
-            return '-'.join(facility_parts).upper()
+                return None
+            
+            # Try to find a site with this facility code
+            facility_code = part.upper()
+            site = self._check_site_exists(facility_code)
+            if site:
+                return facility_code
         
         return None
+    
+    def _check_site_exists(self, facility_code):
+        """Check if a site exists with the given facility code."""
+        try:
+            return Site.objects.get(facility=facility_code)
+        except ObjectDoesNotExist:
+            # Try case-insensitive search
+            return Site.objects.filter(facility__iexact=facility_code).first()
+        except Site.MultipleObjectsReturned:
+            return Site.objects.filter(facility=facility_code).first()
 
     def extract_device_role(self, device_name):
         """
@@ -123,7 +139,7 @@ class AkipsDeviceImport(Job):
         try:
             return DeviceType.objects.get(model=model_name, manufacturer=manufacturer)
         except ObjectDoesNotExist:
-            if self.create_missing_objects.value:
+            if self.create_missing:
                 slug = model_name.lower().replace(' ', '-')
                 device_type = DeviceType.objects.create(
                     manufacturer=manufacturer,
@@ -160,21 +176,10 @@ class AkipsDeviceImport(Job):
         if not facility_code:
             return None, None
         
-        try:
-            site = Site.objects.get(facility=facility_code)
+        site = self._check_site_exists(facility_code)
+        if site:
             return site, site.region
-        except ObjectDoesNotExist:
-            # Try case-insensitive search
-            site = Site.objects.filter(facility__iexact=facility_code).first()
-            if site:
-                return site, site.region
-            return None, None
-        except Site.MultipleObjectsReturned:
-            self.log_warning(
-                f"Multiple sites found with facility code '{facility_code}'. Using first match."
-            )
-            site = Site.objects.filter(facility=facility_code).first()
-            return site, site.region
+        return None, None
 
     def parse_csv(self, csv_content):
         """Parse CSV content and return grouped devices."""
@@ -476,6 +481,9 @@ class AkipsDeviceImport(Job):
     def run(self, data, commit):
         """Main job execution."""
         self.log_info("Starting AKIPS Device Import")
+        
+        # Set the create_missing flag from input data
+        self.create_missing = data.get('create_missing_objects', False)
         
         try:
             # Parse CSV
