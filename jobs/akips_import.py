@@ -363,7 +363,6 @@ class AkipsDeviceImport(Job):
                 platform=platform,
                 serial=member_data['serial'],
                 site=site,
-                region=region,
                 comments=f"Software: {member_data['software']}\nMAC: {member_data['mac_addr']}\nLocation: {member_data['location']}"
             )
             
@@ -423,7 +422,6 @@ class AkipsDeviceImport(Job):
                         platform=platform,
                         serial=member_data['serial'],
                         site=site,
-                        region=region,
                         virtual_chassis=vc,
                         vc_position=member_data['member_id'],
                         vc_priority=1 if member_data['role'].lower() == 'master' else (
@@ -488,7 +486,6 @@ class AkipsDeviceImport(Job):
                         platform=platform,
                         serial=member_data['serial'],
                         site=site,
-                        region=region,
                         virtual_chassis=vc,
                         vc_position=member_data['member_id'],
                         vc_priority=1 if member_data['role'].lower() == 'master' else (
