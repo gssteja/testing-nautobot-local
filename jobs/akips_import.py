@@ -130,30 +130,75 @@ class AkipsDeviceImport(Job):
             return None
 
     def get_or_create_device_type(self, model_name):
-        """Get or create a DeviceType."""
+        """Get or create a DeviceType with flexible matching."""
         manufacturer, _ = Manufacturer.objects.get_or_create(
             name="Juniper",
             defaults={"slug": "juniper"}
         )
         
-        try:
-            return DeviceType.objects.get(model=model_name, manufacturer=manufacturer)
-        except ObjectDoesNotExist:
-            if self.create_missing:
-                slug = model_name.lower().replace(' ', '-')
-                device_type = DeviceType.objects.create(
-                    manufacturer=manufacturer,
-                    model=model_name,
-                    slug=slug
-                )
-                self.log_success(f"Created DeviceType: {model_name}")
+        # Normalize the model name from CSV (e.g., "ex4300-48p" -> "EX4300-48P")
+        normalized_model = model_name.upper()
+        
+        # Try multiple lookup strategies
+        lookup_attempts = [
+            model_name,  # Exact match as-is
+            normalized_model,  # Uppercase version
+            f"Juniper {normalized_model}",  # With "Juniper" prefix
+            f"Juniper {model_name}",  # With "Juniper" prefix, original case
+        ]
+        
+        # Try each lookup strategy
+        for attempt in lookup_attempts:
+            try:
+                device_type = DeviceType.objects.get(model=attempt, manufacturer=manufacturer)
+                self.log_debug(f"Found DeviceType: {device_type.model}")
                 return device_type
-            else:
-                self.log_warning(
-                    f"DeviceType '{model_name}' not found. "
-                    "Enable 'create_missing_objects' or create it manually."
-                )
-                return None
+            except ObjectDoesNotExist:
+                continue
+            except DeviceType.MultipleObjectsReturned:
+                # If multiple found, use the first one
+                device_type = DeviceType.objects.filter(model=attempt, manufacturer=manufacturer).first()
+                self.log_warning(f"Multiple DeviceTypes found for '{attempt}', using: {device_type.model}")
+                return device_type
+        
+        # If still not found, try case-insensitive search
+        device_type = DeviceType.objects.filter(
+            model__iexact=normalized_model,
+            manufacturer=manufacturer
+        ).first()
+        
+        if device_type:
+            self.log_debug(f"Found DeviceType via case-insensitive search: {device_type.model}")
+            return device_type
+        
+        # Try with "Juniper" prefix case-insensitive
+        device_type = DeviceType.objects.filter(
+            model__iexact=f"Juniper {normalized_model}",
+            manufacturer=manufacturer
+        ).first()
+        
+        if device_type:
+            self.log_debug(f"Found DeviceType via case-insensitive search: {device_type.model}")
+            return device_type
+        
+        # If create_missing is enabled, create it
+        if self.create_missing:
+            # Create with "Juniper" prefix to match your convention
+            full_model_name = f"Juniper {normalized_model}"
+            slug = full_model_name.lower().replace(' ', '-')
+            device_type = DeviceType.objects.create(
+                manufacturer=manufacturer,
+                model=full_model_name,
+                slug=slug
+            )
+            self.log_success(f"Created DeviceType: {full_model_name}")
+            return device_type
+        else:
+            self.log_warning(
+                f"DeviceType for model '{model_name}' not found (tried: {', '.join(lookup_attempts)}). "
+                "Enable 'create_missing_objects' or create it manually."
+            )
+            return None
 
     def get_platform(self):
         """Get or create the Juniper_junos platform."""
