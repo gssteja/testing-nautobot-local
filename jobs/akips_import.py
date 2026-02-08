@@ -97,9 +97,15 @@ class AkipsDeviceImport(Job):
             return Site.objects.get(facility=facility_code)
         except ObjectDoesNotExist:
             # Try case-insensitive search
-            return Site.objects.filter(facility__iexact=facility_code).first()
+            try:
+                return Site.objects.filter(facility__iexact=facility_code).first()
+            except Exception:
+                return None
         except Site.MultipleObjectsReturned:
             return Site.objects.filter(facility=facility_code).first()
+        except Exception:
+            # Catch any other exception to prevent transaction breakage
+            return None
 
     def extract_device_role(self, device_name):
         """
@@ -270,9 +276,11 @@ class AkipsDeviceImport(Job):
         site, region = self.find_site_by_facility_code(facility_code)
         
         if not site:
-            warning = f"No site found for facility code '{facility_code}' (device: {device_name})"
+            warning = f"No site found for facility code '{facility_code}' (device: {device_name}) - SKIPPING"
             self.log_warning(warning)
             self.stats['warnings'].append(warning)
+            self.stats['devices_skipped'] += len(members)
+            return  # Skip this device entirely if no site found
         else:
             self.log_success(f"Matched to site: {site.name} (Region: {region.name if region else 'None'})")
         
