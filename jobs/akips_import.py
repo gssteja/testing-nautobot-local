@@ -472,29 +472,49 @@ class AkipsDeviceImport(Job):
         # Verify each member
         for member_data in members:
             member_device_name = f"{vc.name}-{member_data['member_id']}"
+            
+            # First check by name
             member_device = Device.objects.filter(name=member_device_name).first()
+            
+            # If not found by name, check by vc_position within this chassis
+            if not member_device:
+                member_device = Device.objects.filter(
+                    virtual_chassis=vc,
+                    vc_position=member_data['member_id']
+                ).first()
+                
+                if member_device:
+                    self.log_info(
+                        f"Found device at position {member_data['member_id']} with different name: "
+                        f"{member_device.name} (expected {member_device_name})"
+                    )
             
             if not member_device:
                 self.log_warning(f"Member device not found: {member_device_name}")
                 # Create missing member
                 device_type = self.get_or_create_device_type(member_data['model'])
                 if device_type:
-                    member_device = Device.objects.create(
-                        name=member_device_name,
-                        device_role=device_role,
-                        device_type=device_type,
-                        platform=platform,
-                        serial=member_data['serial'],
-                        site=site,
-                        virtual_chassis=vc,
-                        vc_position=member_data['member_id'],
-                        vc_priority=1 if member_data['role'].lower() == 'master' else (
-                            1 if member_data['role'].lower() == 'backup' else None
-                        ),
-                        comments=f"Software: {member_data['software']}\nMAC: {member_data['mac_addr']}\nLocation: {member_data['location']}"
-                    )
-                    self.log_success(f"Created missing member: {member_device_name}")
-                    self.stats['devices_created'] += 1
+                    try:
+                        member_device = Device.objects.create(
+                            name=member_device_name,
+                            device_role=device_role,
+                            device_type=device_type,
+                            platform=platform,
+                            serial=member_data['serial'],
+                            site=site,
+                            virtual_chassis=vc,
+                            vc_position=member_data['member_id'],
+                            vc_priority=1 if member_data['role'].lower() == 'master' else (
+                                1 if member_data['role'].lower() == 'backup' else None
+                            ),
+                            comments=f"Software: {member_data['software']}\nMAC: {member_data['mac_addr']}\nLocation: {member_data['location']}"
+                        )
+                        self.log_success(f"Created missing member: {member_device_name}")
+                        self.stats['devices_created'] += 1
+                    except Exception as e:
+                        error = f"Failed to create member {member_device_name}: {str(e)}"
+                        self.log_failure(error)
+                        self.stats['errors'].append(error)
                 continue
             
             # Verify serial number
